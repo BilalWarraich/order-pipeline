@@ -79,3 +79,15 @@ func TestGetMissing(t *testing.T) {
 		t.Fatalf("got %d", resp.StatusCode)
 	}
 }
+
+func TestIndex(t *testing.T) {
+	srv, _ := setup(t)
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("got %d", resp.StatusCode)
+	}
+}

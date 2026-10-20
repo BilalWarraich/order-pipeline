@@ -33,6 +33,7 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
 
+	r.Get("/", s.index)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -120,6 +121,22 @@ func (s *Server) listOrders(w http.ResponseWriter, r *http.Request) {
 		orders = []*order.Order{}
 	}
 	writeJSON(w, http.StatusOK, orders)
+}
+
+// index is mostly so people opening the url in a browser don't just get a 404
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service": "order-pipeline",
+		"source":  "https://github.com/BilalWarraich/order-pipeline",
+		"endpoints": []string{
+			"POST /orders",
+			"GET  /orders?limit=N",
+			"GET  /orders/{id}",
+			"GET  /stats",
+			"GET  /healthz",
+		},
+		"example": `curl -XPOST <this url>/orders -d '{"customer_id":"c1","items":[{"sku":"KB-01","qty":2,"price_cents":4999}]}'`,
+	})
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
