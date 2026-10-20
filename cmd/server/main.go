@@ -14,11 +14,16 @@ import (
 	"github.com/BilalWarraich/order-pipeline/internal/api"
 	"github.com/BilalWarraich/order-pipeline/internal/order"
 	"github.com/BilalWarraich/order-pipeline/internal/worker"
+	"github.com/BilalWarraich/order-pipeline/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
 	addr := env("ADDR", ":8080")
+	// most hosting platforms (render, koyeb, cloud run...) pass the port this way
+	if port := os.Getenv("PORT"); port != "" {
+		addr = ":" + port
+	}
 	workers := envInt("WORKERS", 4)
 	queueSize := envInt("QUEUE_SIZE", 100)
 
@@ -34,6 +39,9 @@ func main() {
 		defer db.Close()
 		if err := db.Ping(ctx); err != nil {
 			log.Fatalf("db ping: %v", err)
+		}
+		if err := migrations.Run(ctx, db); err != nil {
+			log.Fatalf("migrations: %v", err)
 		}
 		store = order.NewPGStore(db)
 		log.Println("using postgres")
