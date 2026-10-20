@@ -19,6 +19,24 @@ If the queue is full the API returns `503` with `Retry-After` instead of blockin
 
 On SIGTERM the http server stops first, then the pool drains whatever is left in the queue.
 
+## Live demo
+
+Running on Render's free tier (with Neon postgres): https://order-pipeline-hkod.onrender.com
+
+It sleeps when idle, so the first request might take ~30-50s to wake up.
+
+```
+curl https://order-pipeline-hkod.onrender.com/healthz
+
+curl -XPOST https://order-pipeline-hkod.onrender.com/orders -d '{
+  "customer_id": "c1",
+  "items": [{"sku": "KB-01", "qty": 2, "price_cents": 4999}]
+}'
+
+curl https://order-pipeline-hkod.onrender.com/orders?limit=5
+curl https://order-pipeline-hkod.onrender.com/stats
+```
+
 ## Running
 
 Without docker (uses an in-memory store):
