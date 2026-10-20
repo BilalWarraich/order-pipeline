@@ -58,6 +58,19 @@ Orders over $5000 get rejected by the "fraud check", so you can see the failed p
 | `QUEUE_SIZE` | 100 | |
 | `FAIL_RATE` | 0 | chance a fake step fails, 0-1 |
 
+## Deploying
+
+There's a `render.yaml` so it can go on Render's free tier:
+
+1. create a free postgres on [neon.tech](https://neon.tech) and copy the connection string
+2. on Render: New -> Blueprint -> pick this repo
+3. paste the neon connection string as `DATABASE_URL`
+
+Tables get created on startup (`migrations/`). If `DATABASE_URL` is empty it just runs with the
+in-memory store, which also works for a quick demo.
+
+Free instances sleep after ~15 min idle, so the first request can take a while.
+
 ## Tests
 
 ```

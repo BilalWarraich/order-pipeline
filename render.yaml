@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: order-pipeline
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      # set this in the render dashboard, I use a free neon.tech postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: WORKERS
+        value: "4"
+      - key: FAIL_RATE
+        value: "0.05"
