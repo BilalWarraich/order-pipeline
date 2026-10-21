@@ -1,0 +1,12 @@
+linters:
+  enable:
+    - gofmt
+    - misspell
+    - bodyclose
+
+issues:
+  exclude-rules:
+    # not checking Submit/Shutdown errors in tests is fine, the asserts cover it
+    - path: _test\.go
+      linters:
+        - errcheck

@@ -1,5 +1,7 @@
 # order-pipeline
 
+[![ci](https://github.com/BilalWarraich/order-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/BilalWarraich/order-pipeline/actions/workflows/ci.yml)
+
 Small order processing service I've been hacking on to play with goroutines/channels
 in something closer to a real backend than the usual tutorial examples.
 
