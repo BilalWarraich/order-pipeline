@@ -35,7 +35,7 @@ func (s *Server) Routes() http.Handler {
 
 	r.Get("/", s.index)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 	r.Get("/stats", s.stats)
 
@@ -146,7 +146,10 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		// headers are already sent at this point, nothing useful to do but log
+		log.Printf("write response: %v", err)
+	}
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
@@ -155,6 +158,6 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 
 func newID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	_, _ = rand.Read(b) // crypto/rand doesn't fail on any OS we care about
 	return "ord_" + hex.EncodeToString(b)
 }

@@ -37,7 +37,9 @@ func TestCreateAndGet(t *testing.T) {
 	}
 
 	var o order.Order
-	json.NewDecoder(resp.Body).Decode(&o)
+	if err := json.NewDecoder(resp.Body).Decode(&o); err != nil {
+		t.Fatal(err)
+	}
 	if o.TotalCts != 9998 {
 		t.Errorf("total = %d", o.TotalCts)
 	}
