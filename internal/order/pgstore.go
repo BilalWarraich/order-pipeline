@@ -88,3 +88,14 @@ func scanOrder(row pgx.Row) (*Order, error) {
 	}
 	return &o, nil
 }
+
+// Claim relies on the WHERE status = 'pending' so two workers racing on the same
+// order can't both win, postgres only lets one UPDATE match.
+func (s *PGStore) Claim(ctx context.Context, id string) (bool, error) {
+	tag, err := s.db.Exec(ctx,
+		`UPDATE orders SET status = 'processing', updated_at = now() WHERE id = $1 AND status = 'pending'`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}

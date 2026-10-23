@@ -3,6 +3,8 @@ package order
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -93,5 +95,58 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("Validate() = %v, want ok=%v", err, tc.ok)
 			}
 		})
+	}
+}
+
+// countingStore counts how many times an order actually gets processed
+type countingStore struct {
+	*MemStore
+	done atomic.Int32
+}
+
+func (c *countingStore) UpdateStatus(ctx context.Context, id string, s Status, msg string) error {
+	if s == StatusDone {
+		c.done.Add(1)
+	}
+	return c.MemStore.UpdateStatus(ctx, id, s, msg)
+}
+
+func TestSameOrderProcessedOnce(t *testing.T) {
+	s := &countingStore{MemStore: NewMemStore()}
+	id := newTestOrder(t, s, 1000)
+	p := &Processor{Store: s}
+
+	// simulate the order being queued twice (e.g. by the sweeper) and picked up
+	// by several workers at the same time
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.Process(context.Background(), id); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if n := s.done.Load(); n != 1 {
+		t.Fatalf("order was processed %d times", n)
+	}
+}
+
+func TestClaim(t *testing.T) {
+	s := NewMemStore()
+	id := newTestOrder(t, s, 100)
+	ctx := context.Background()
+
+	if ok, _ := s.Claim(ctx, id); !ok {
+		t.Fatal("first claim should win")
+	}
+	if ok, _ := s.Claim(ctx, id); ok {
+		t.Fatal("second claim should lose")
+	}
+	if _, err := s.Claim(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("got %v", err)
 	}
 }

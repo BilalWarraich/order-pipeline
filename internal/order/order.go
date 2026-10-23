@@ -66,4 +66,7 @@ type Store interface {
 	Get(ctx context.Context, id string) (*Order, error)
 	List(ctx context.Context, limit int) ([]*Order, error)
 	UpdateStatus(ctx context.Context, id string, s Status, errMsg string) error
+	// Claim flips an order from pending to processing, but only if it's still
+	// pending. Returns false if someone else got it first.
+	Claim(ctx context.Context, id string) (bool, error)
 }

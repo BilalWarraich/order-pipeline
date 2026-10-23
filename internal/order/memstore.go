@@ -63,3 +63,18 @@ func (m *MemStore) UpdateStatus(_ context.Context, id string, s Status, errMsg s
 	o.UpdatedAt = time.Now().UTC()
 	return nil
 }
+
+func (m *MemStore) Claim(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.orders[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if o.Status != StatusPending {
+		return false, nil
+	}
+	o.Status = StatusProcessing
+	o.UpdatedAt = time.Now().UTC()
+	return true, nil
+}

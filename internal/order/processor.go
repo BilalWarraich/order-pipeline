@@ -22,17 +22,25 @@ type Processor struct {
 }
 
 func (p *Processor) Process(ctx context.Context, id string) error {
-	if p.Timeout == 0 {
-		p.Timeout = 5 * time.Second
+	// don't write to p.Timeout here, Process runs on several workers at once
+	timeout := p.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	o, err := p.Store.Get(ctx, id)
+	ok, err := p.Store.Claim(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := p.Store.UpdateStatus(ctx, id, StatusProcessing, ""); err != nil {
+	if !ok {
+		// already picked up by another worker (or done), nothing to do
+		return nil
+	}
+
+	o, err := p.Store.Get(ctx, id)
+	if err != nil {
 		return err
 	}
 
