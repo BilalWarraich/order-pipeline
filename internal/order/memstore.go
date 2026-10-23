@@ -78,3 +78,18 @@ func (m *MemStore) Claim(_ context.Context, id string) (bool, error) {
 	o.UpdatedAt = time.Now().UTC()
 	return true, nil
 }
+
+func (m *MemStore) StalePending(_ context.Context, before time.Time, limit int) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var ids []string
+	for _, o := range m.orders {
+		if o.Status == StatusPending && o.CreatedAt.Before(before) {
+			ids = append(ids, o.ID)
+			if limit > 0 && len(ids) >= limit {
+				break
+			}
+		}
+	}
+	return ids, nil
+}

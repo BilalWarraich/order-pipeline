@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,4 +99,16 @@ func (s *PGStore) Claim(ctx context.Context, id string) (bool, error) {
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+func (s *PGStore) StalePending(ctx context.Context, before time.Time, limit int) ([]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id FROM orders
+		WHERE status = 'pending' AND created_at < $1
+		ORDER BY created_at
+		LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }

@@ -19,7 +19,12 @@ with exponential backoff, and there's a timeout on the whole thing.
 
 If the queue is full the API returns `503` with `Retry-After` instead of blocking.
 
-On SIGTERM the http server stops first, then the pool drains whatever is left in the queue.
+A sweeper goroutine runs every 30s and re-queues orders that have been `pending` for too long
+(queue was full, or the process died before a worker got to them). Workers *claim* an order with
+a conditional update (`... WHERE status = 'pending'`) before touching it, so an order that ends up
+queued twice still only gets processed once.
+
+On SIGTERM the http server stops first, then the sweeper, then the pool drains whatever is left in the queue.
 
 ## Live demo
 
@@ -77,6 +82,7 @@ Orders over $5000 get rejected by the "fraud check", so you can see the failed p
 | `WORKERS` | 4 | |
 | `QUEUE_SIZE` | 100 | |
 | `FAIL_RATE` | 0 | chance a fake step fails, 0-1 |
+| `STUCK_AFTER_SECS` | 120 | sweeper re-queues pending orders older than this |
 
 ## Deploying
 
@@ -99,7 +105,8 @@ make test
 
 ## TODO
 
-- [ ] sweeper for orders stuck in `pending` (e.g. after a crash, or when queue was full)
+- [x] sweeper for orders stuck in `pending` (e.g. after a crash, or when queue was full)
+- [ ] same thing for orders stuck in `processing` after a crash
 - [ ] prometheus metrics
 - [ ] replace the in-process queue with NATS or something so it can scale out
 - [ ] real idempotency keys on POST

@@ -13,6 +13,7 @@ import (
 
 	"github.com/BilalWarraich/order-pipeline/internal/api"
 	"github.com/BilalWarraich/order-pipeline/internal/order"
+	"github.com/BilalWarraich/order-pipeline/internal/sweeper"
 	"github.com/BilalWarraich/order-pipeline/internal/worker"
 	"github.com/BilalWarraich/order-pipeline/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +55,18 @@ func main() {
 	proc := &order.Processor{Store: store, FailRate: failRate}
 	pool := worker.NewPool(workers, queueSize, proc.Process)
 
+	sw := &sweeper.Sweeper{
+		Store:    store,
+		Submit:   pool.Submit,
+		Interval: 30 * time.Second,
+		MaxAge:   time.Duration(envInt("STUCK_AFTER_SECS", 120)) * time.Second,
+	}
+	sweeperDone := make(chan struct{})
+	go func() {
+		sw.Run(ctx)
+		close(sweeperDone)
+	}()
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           api.New(store, pool).Routes(),
@@ -77,6 +90,9 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
+	// ctx is already cancelled so the sweeper is on its way out, wait for it
+	// so it doesn't submit into a closed pool
+	<-sweeperDone
 	if err := pool.Shutdown(shutdownCtx); err != nil {
 		log.Printf("worker shutdown: %v (some orders may still be pending)", err)
 	}

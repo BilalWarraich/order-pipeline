@@ -69,4 +69,6 @@ type Store interface {
 	// Claim flips an order from pending to processing, but only if it's still
 	// pending. Returns false if someone else got it first.
 	Claim(ctx context.Context, id string) (bool, error)
+	// StalePending returns ids of orders still pending that were created before `before`.
+	StalePending(ctx context.Context, before time.Time, limit int) ([]string, error)
 }
