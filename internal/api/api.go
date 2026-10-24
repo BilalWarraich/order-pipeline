@@ -14,15 +14,20 @@ import (
 	"github.com/BilalWarraich/order-pipeline/internal/worker"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Server struct {
-	store order.Store
-	pool  *worker.Pool
+	store   order.Store
+	pool    *worker.Pool
+	reg     *prometheus.Registry
+	reqHist *prometheus.HistogramVec
 }
 
 func New(store order.Store, pool *worker.Pool) *Server {
-	return &Server{store: store, pool: pool}
+	reg, hist := newRegistry(pool)
+	return &Server{store: store, pool: pool, reg: reg, reqHist: hist}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -31,6 +36,7 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(metricsMiddleware(s.reqHist))
 	r.Use(middleware.Timeout(10 * time.Second))
 
 	r.Get("/", s.index)
@@ -38,6 +44,8 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	r.Get("/stats", s.stats)
+	// fine for a demo, in a real deployment this shouldn't be public
+	r.Handle("/metrics", promhttp.HandlerFor(s.reg, promhttp.HandlerOpts{}))
 
 	r.Route("/orders", func(r chi.Router) {
 		r.Post("/", s.createOrder)
@@ -133,6 +141,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 			"GET  /orders?limit=N",
 			"GET  /orders/{id}",
 			"GET  /stats",
+			"GET  /metrics",
 			"GET  /healthz",
 		},
 		"example": `curl -XPOST <this url>/orders -d '{"customer_id":"c1","items":[{"sku":"KB-01","qty":2,"price_cents":4999}]}'`,

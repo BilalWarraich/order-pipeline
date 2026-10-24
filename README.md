@@ -69,6 +69,7 @@ curl -XPOST localhost:8080/orders -d '{
 curl localhost:8080/orders/<id>
 curl localhost:8080/orders?limit=10
 curl localhost:8080/stats
+curl localhost:8080/metrics
 ```
 
 Orders over $5000 get rejected by the "fraud check", so you can see the failed path.
@@ -107,6 +108,6 @@ make test
 
 - [x] sweeper for orders stuck in `pending` (e.g. after a crash, or when queue was full)
 - [ ] same thing for orders stuck in `processing` after a crash
-- [ ] prometheus metrics
+- [x] prometheus metrics (`/metrics`: request latency per route, queue depth, processed/failed)
 - [ ] replace the in-process queue with NATS or something so it can scale out
 - [ ] real idempotency keys on POST

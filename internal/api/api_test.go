@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,5 +92,34 @@ func TestIndex(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("got %d", resp.StatusCode)
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	srv, _ := setup(t)
+
+	// hit a route with an id in it first
+	resp, _ := http.Get(srv.URL + "/orders/ord_123")
+	resp.Body.Close()
+
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	for _, want := range []string{
+		`http_request_duration_seconds_count{code="404",method="GET",route="/orders/{id}"} 1`,
+		"orders_queue_depth 0",
+		"orders_processed_total",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output missing %q", want)
+		}
+	}
+	if strings.Contains(body, "ord_123") {
+		t.Error("order id leaked into a label, that's a cardinality bomb")
 	}
 }
