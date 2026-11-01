@@ -15,7 +15,10 @@ const (
 	StatusFailed     Status = "failed"
 )
 
-var ErrNotFound = errors.New("order not found")
+var (
+	ErrNotFound     = errors.New("order not found")
+	ErrDuplicateKey = errors.New("idempotency key already used")
+)
 
 type Item struct {
 	SKU      string `json:"sku"`
@@ -24,14 +27,16 @@ type Item struct {
 }
 
 type Order struct {
-	ID         string    `json:"id"`
-	CustomerID string    `json:"customer_id"`
-	Items      []Item    `json:"items"`
-	TotalCts   int64     `json:"total_cents"`
-	Status     Status    `json:"status"`
-	Error      string    `json:"error,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string `json:"id"`
+	CustomerID string `json:"customer_id"`
+	Items      []Item `json:"items"`
+	TotalCts   int64  `json:"total_cents"`
+	Status     Status `json:"status"`
+	Error      string `json:"error,omitempty"`
+	// IdempotencyKey comes from the Idempotency-Key header, optional
+	IdempotencyKey string    `json:"idempotency_key,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (o *Order) Total() int64 {
@@ -62,7 +67,9 @@ func (o *Order) Validate() error {
 }
 
 type Store interface {
+	// Create returns ErrDuplicateKey if o.IdempotencyKey is already taken
 	Create(ctx context.Context, o *Order) error
+	GetByIdempotencyKey(ctx context.Context, key string) (*Order, error)
 	Get(ctx context.Context, id string) (*Order, error)
 	List(ctx context.Context, limit int) ([]*Order, error)
 	UpdateStatus(ctx context.Context, id string, s Status, errMsg string) error

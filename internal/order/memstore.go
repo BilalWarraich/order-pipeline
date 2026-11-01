@@ -11,18 +11,35 @@ import (
 type MemStore struct {
 	mu     sync.RWMutex
 	orders map[string]*Order
+	byKey  map[string]string // idempotency key -> order id
 }
 
 func NewMemStore() *MemStore {
-	return &MemStore{orders: make(map[string]*Order)}
+	return &MemStore{orders: make(map[string]*Order), byKey: make(map[string]string)}
 }
 
 func (m *MemStore) Create(_ context.Context, o *Order) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if o.IdempotencyKey != "" {
+		if _, taken := m.byKey[o.IdempotencyKey]; taken {
+			return ErrDuplicateKey
+		}
+		m.byKey[o.IdempotencyKey] = o.ID
+	}
 	cp := *o
 	m.orders[o.ID] = &cp
 	return nil
+}
+
+func (m *MemStore) GetByIdempotencyKey(ctx context.Context, key string) (*Order, error) {
+	m.mu.RLock()
+	id, ok := m.byKey[key]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return m.Get(ctx, id)
 }
 
 func (m *MemStore) Get(_ context.Context, id string) (*Order, error) {

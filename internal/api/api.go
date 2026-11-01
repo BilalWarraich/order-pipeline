@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -67,14 +68,21 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	key := r.Header.Get("Idempotency-Key")
+	if len(key) > 255 {
+		writeErr(w, http.StatusBadRequest, "Idempotency-Key is too long (max 255)")
+		return
+	}
+
 	now := time.Now().UTC()
 	o := &order.Order{
-		ID:         newID(),
-		CustomerID: req.CustomerID,
-		Items:      req.Items,
-		Status:     order.StatusPending,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:             newID(),
+		CustomerID:     req.CustomerID,
+		Items:          req.Items,
+		Status:         order.StatusPending,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		IdempotencyKey: key,
 	}
 	if err := o.Validate(); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -82,7 +90,12 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	o.TotalCts = o.Total()
 
-	if err := s.store.Create(r.Context(), o); err != nil {
+	err := s.store.Create(r.Context(), o)
+	if errors.Is(err, order.ErrDuplicateKey) {
+		s.replayOrder(w, r, key, req)
+		return
+	}
+	if err != nil {
 		log.Printf("create order: %v", err)
 		writeErr(w, http.StatusInternalServerError, "could not save order")
 		return
@@ -98,6 +111,25 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, o)
+}
+
+// replayOrder handles a retried request: same key + same body gets the original
+// order back (and it's NOT queued again). Same key with a different body is
+// almost always a client bug, so that's an error instead of silently
+// returning some other order.
+func (s *Server) replayOrder(w http.ResponseWriter, r *http.Request, key string, req createReq) {
+	existing, err := s.store.GetByIdempotencyKey(r.Context(), key)
+	if err != nil {
+		log.Printf("idempotency lookup: %v", err)
+		writeErr(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	if existing.CustomerID != req.CustomerID || !slices.Equal(existing.Items, req.Items) {
+		writeErr(w, http.StatusUnprocessableEntity, "Idempotency-Key was already used for a different request")
+		return
+	}
+	w.Header().Set("Idempotent-Replayed", "true")
+	writeJSON(w, http.StatusOK, existing)
 }
 
 func (s *Server) getOrder(w http.ResponseWriter, r *http.Request) {

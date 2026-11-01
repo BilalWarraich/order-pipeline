@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/BilalWarraich/order-pipeline/internal/order"
@@ -121,5 +122,75 @@ func TestMetrics(t *testing.T) {
 	}
 	if strings.Contains(body, "ord_123") {
 		t.Error("order id leaked into a label, that's a cardinality bomb")
+	}
+}
+
+// returns status + headers, not the response itself, the body is already closed here
+func postWithKey(t *testing.T, url, key, body string) (int, http.Header, order.Order) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url+"/orders", strings.NewReader(body))
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var o order.Order
+	_ = json.NewDecoder(resp.Body).Decode(&o)
+	return resp.StatusCode, resp.Header, o
+}
+
+func TestIdempotencyKey(t *testing.T) {
+	srv, _ := setup(t)
+	body := `{"customer_id":"c1","items":[{"sku":"KB-01","qty":1,"price_cents":4999}]}`
+
+	code1, _, o1 := postWithKey(t, srv.URL, "abc-123", body)
+	if code1 != http.StatusAccepted {
+		t.Fatalf("first: %d", code1)
+	}
+
+	// client retries, e.g. after a timeout
+	code2, h2, o2 := postWithKey(t, srv.URL, "abc-123", body)
+	if code2 != http.StatusOK || h2.Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("retry: status %d, replayed=%q", code2, h2.Get("Idempotent-Replayed"))
+	}
+	if o2.ID != o1.ID {
+		t.Fatalf("retry created a new order: %s vs %s", o2.ID, o1.ID)
+	}
+
+	// same key, different order -> refuse
+	other := `{"customer_id":"c1","items":[{"sku":"MOUSE","qty":1,"price_cents":999}]}`
+	if code3, _, _ := postWithKey(t, srv.URL, "abc-123", other); code3 != http.StatusUnprocessableEntity {
+		t.Fatalf("different body with same key: %d", code3)
+	}
+
+	// no key -> two separate orders like before
+	_, _, a := postWithKey(t, srv.URL, "", body)
+	_, _, b := postWithKey(t, srv.URL, "", body)
+	if a.ID == b.ID {
+		t.Fatal("requests without a key shouldn't be deduped")
+	}
+}
+
+func TestIdempotencyKeyConcurrent(t *testing.T) {
+	srv, store := setup(t)
+	body := `{"customer_id":"c1","items":[{"sku":"KB-01","qty":1,"price_cents":4999}]}`
+
+	// a double-clicked "buy" button: same request fired at the same time
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			postWithKey(t, srv.URL, "double-click", body)
+		}()
+	}
+	wg.Wait()
+
+	all, _ := store.List(context.Background(), 100)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 order, got %d", len(all))
 	}
 }

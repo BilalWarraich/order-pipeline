@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,16 +25,34 @@ func (s *PGStore) Create(ctx context.Context, o *Order) error {
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO orders (id, customer_id, items, total_cents, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		o.ID, o.CustomerID, items, o.TotalCts, o.Status, o.CreatedAt, o.UpdatedAt)
+		INSERT INTO orders (id, customer_id, items, total_cents, status, created_at, updated_at, idempotency_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''))`,
+		o.ID, o.CustomerID, items, o.TotalCts, o.Status, o.CreatedAt, o.UpdatedAt, o.IdempotencyKey)
+
+	// let the unique index decide, a "check then insert" would race when the
+	// same request comes in twice at the same time
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "orders_idempotency_key_idx" {
+		return ErrDuplicateKey
+	}
 	return err
 }
 
 func (s *PGStore) Get(ctx context.Context, id string) (*Order, error) {
 	row := s.db.QueryRow(ctx, `
-		SELECT id, customer_id, items, total_cents, status, coalesce(error, ''), created_at, updated_at
+		SELECT id, customer_id, items, total_cents, status, coalesce(error, ''), created_at, updated_at, coalesce(idempotency_key, '')
 		FROM orders WHERE id = $1`, id)
+	o, err := scanOrder(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return o, err
+}
+
+func (s *PGStore) GetByIdempotencyKey(ctx context.Context, key string) (*Order, error) {
+	row := s.db.QueryRow(ctx, `
+		SELECT id, customer_id, items, total_cents, status, coalesce(error, ''), created_at, updated_at, coalesce(idempotency_key, '')
+		FROM orders WHERE idempotency_key = $1`, key)
 	o, err := scanOrder(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -46,7 +65,7 @@ func (s *PGStore) List(ctx context.Context, limit int) ([]*Order, error) {
 		limit = 50
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT id, customer_id, items, total_cents, status, coalesce(error, ''), created_at, updated_at
+		SELECT id, customer_id, items, total_cents, status, coalesce(error, ''), created_at, updated_at, coalesce(idempotency_key, '')
 		FROM orders ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -80,7 +99,7 @@ func (s *PGStore) UpdateStatus(ctx context.Context, id string, st Status, errMsg
 func scanOrder(row pgx.Row) (*Order, error) {
 	var o Order
 	var items []byte
-	err := row.Scan(&o.ID, &o.CustomerID, &items, &o.TotalCts, &o.Status, &o.Error, &o.CreatedAt, &o.UpdatedAt)
+	err := row.Scan(&o.ID, &o.CustomerID, &items, &o.TotalCts, &o.Status, &o.Error, &o.CreatedAt, &o.UpdatedAt, &o.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}

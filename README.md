@@ -72,6 +72,15 @@ curl localhost:8080/stats
 curl localhost:8080/metrics
 ```
 
+Send an `Idempotency-Key` header to make retries safe: the same key with the same body returns
+the original order (`200`, `Idempotent-Replayed: true`) instead of creating a second one, the same
+key with a different body is a `422`. Uniqueness is enforced by a unique index in postgres,
+so two identical requests arriving at the same time still only create one order.
+
+```
+curl -XPOST localhost:8080/orders -H 'Idempotency-Key: 7f1c...' -d '{...}'
+```
+
 Orders over $5000 get rejected by the "fraud check", so you can see the failed path.
 
 ## Config
@@ -110,4 +119,4 @@ make test
 - [ ] same thing for orders stuck in `processing` after a crash
 - [x] prometheus metrics (`/metrics`: request latency per route, queue depth, processed/failed)
 - [ ] replace the in-process queue with NATS or something so it can scale out
-- [ ] real idempotency keys on POST
+- [x] idempotency keys on POST
