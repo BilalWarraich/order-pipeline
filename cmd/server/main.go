@@ -52,14 +52,20 @@ func main() {
 	}
 
 	failRate, _ := strconv.ParseFloat(os.Getenv("FAIL_RATE"), 64)
-	proc := &order.Processor{Store: store, FailRate: failRate}
+	proc := &order.Processor{Store: store, FailRate: failRate, Timeout: 5 * time.Second}
 	pool := worker.NewPool(workers, queueSize, proc.Process)
 
+	stuckProcessing := time.Duration(envInt("STUCK_PROCESSING_SECS", 300)) * time.Second
+	if stuckProcessing > 0 && stuckProcessing < 2*proc.Timeout {
+		// a live worker could still be on an order this young
+		log.Printf("warning: STUCK_PROCESSING_SECS is less than 2x the processor timeout (%v), orders might get processed twice", proc.Timeout)
+	}
 	sw := &sweeper.Sweeper{
-		Store:    store,
-		Submit:   pool.Submit,
-		Interval: 30 * time.Second,
-		MaxAge:   time.Duration(envInt("STUCK_AFTER_SECS", 120)) * time.Second,
+		Store:           store,
+		Submit:          pool.Submit,
+		Interval:        30 * time.Second,
+		MaxAge:          time.Duration(envInt("STUCK_AFTER_SECS", 120)) * time.Second,
+		StuckProcessing: stuckProcessing,
 	}
 	sweeperDone := make(chan struct{})
 	go func() {

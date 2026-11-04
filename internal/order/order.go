@@ -78,4 +78,7 @@ type Store interface {
 	Claim(ctx context.Context, id string) (bool, error)
 	// StalePending returns ids of orders still pending that were created before `before`.
 	StalePending(ctx context.Context, before time.Time, limit int) ([]string, error)
+	// ResetStuckProcessing puts orders that have been "processing" since before
+	// `before` back to pending (worker probably died). Returns how many.
+	ResetStuckProcessing(ctx context.Context, before time.Time) (int, error)
 }

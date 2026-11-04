@@ -1,5 +1,6 @@
-// Package sweeper re-queues orders that got stuck in pending, e.g. because the
-// queue was full when they came in or the process died before a worker got to them.
+// Package sweeper re-queues orders that got stuck, either in pending (queue was
+// full, or the process died before a worker got to them) or in processing (the
+// process died while a worker was on it).
 package sweeper
 
 import (
@@ -13,6 +14,7 @@ import (
 
 type Finder interface {
 	StalePending(ctx context.Context, before time.Time, limit int) ([]string, error)
+	ResetStuckProcessing(ctx context.Context, before time.Time) (int, error)
 }
 
 type Sweeper struct {
@@ -20,7 +22,11 @@ type Sweeper struct {
 	Submit   func(id string) error
 	Interval time.Duration // how often to look
 	MaxAge   time.Duration // how old a pending order has to be before we touch it
-	Batch    int
+	// how long an order can sit in processing before we assume the worker died.
+	// has to be way longer than the processor timeout, otherwise a slow-but-alive
+	// worker gets its order taken away. 0 = don't do this.
+	StuckProcessing time.Duration
+	Batch           int
 }
 
 // Run blocks until ctx is cancelled.
@@ -47,6 +53,17 @@ func (s *Sweeper) sweepOnce(ctx context.Context) (int, error) {
 	if batch <= 0 {
 		batch = 100
 	}
+	if s.StuckProcessing > 0 {
+		reset, err := s.Store.ResetStuckProcessing(ctx, time.Now().Add(-s.StuckProcessing))
+		if err != nil {
+			return 0, err
+		}
+		if reset > 0 {
+			// they're pending again with an old created_at, so the query below picks them up
+			log.Printf("sweeper: %d orders were stuck in processing, reset to pending", reset)
+		}
+	}
+
 	ids, err := s.Store.StalePending(ctx, time.Now().Add(-s.MaxAge), batch)
 	if err != nil {
 		return 0, err

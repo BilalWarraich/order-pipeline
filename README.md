@@ -24,6 +24,17 @@ A sweeper goroutine runs every 30s and re-queues orders that have been `pending`
 a conditional update (`... WHERE status = 'pending'`) before touching it, so an order that ends up
 queued twice still only gets processed once.
 
+If the process dies while a worker is on an order, that order would sit in `processing` forever.
+So the sweeper also resets orders that have been `processing` for longer than `STUCK_PROCESSING_SECS`
+back to `pending` (one conditional `UPDATE ... WHERE status = 'processing' AND updated_at < ...`), and
+they get picked up again like any other stuck order. The threshold has to be well above the processor
+timeout (5s), otherwise a slow but alive worker would get its order taken away.
+
+This makes processing **at-least-once**: after a crash an order can go through some steps twice (e.g.
+inventory got reserved, then the process died before payment). That's the trade-off for never losing an
+order, and it's why the claim step and idempotency keys exist. In a real system the downstream calls
+(payment etc.) would need their own idempotency keys too.
+
 On SIGTERM the http server stops first, then the sweeper, then the pool drains whatever is left in the queue.
 
 ## Live demo
@@ -93,6 +104,7 @@ Orders over $5000 get rejected by the "fraud check", so you can see the failed p
 | `QUEUE_SIZE` | 100 | |
 | `FAIL_RATE` | 0 | chance a fake step fails, 0-1 |
 | `STUCK_AFTER_SECS` | 120 | sweeper re-queues pending orders older than this |
+| `STUCK_PROCESSING_SECS` | 300 | orders in `processing` longer than this get reset to pending (0 = off) |
 
 ## Deploying
 
@@ -116,7 +128,7 @@ make test
 ## TODO
 
 - [x] sweeper for orders stuck in `pending` (e.g. after a crash, or when queue was full)
-- [ ] same thing for orders stuck in `processing` after a crash
+- [x] same thing for orders stuck in `processing` after a crash
 - [x] prometheus metrics (`/metrics`: request latency per route, queue depth, processed/failed)
 - [ ] replace the in-process queue with NATS or something so it can scale out
 - [x] idempotency keys on POST

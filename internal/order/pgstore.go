@@ -131,3 +131,15 @@ func (s *PGStore) StalePending(ctx context.Context, before time.Time, limit int)
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
+
+// one statement, so an order a worker finishes right now either gets reset or
+// doesn't, there's no read-then-write gap
+func (s *PGStore) ResetStuckProcessing(ctx context.Context, before time.Time) (int, error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE orders SET status = 'pending', updated_at = now()
+		WHERE status = 'processing' AND updated_at < $1`, before)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}

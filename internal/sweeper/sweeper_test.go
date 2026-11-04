@@ -98,3 +98,51 @@ func TestRunStopsOnCancel(t *testing.T) {
 		t.Fatal("expected at least one sweep")
 	}
 }
+
+func TestRecoversStuckProcessing(t *testing.T) {
+	store := order.NewMemStore()
+	ctx := context.Background()
+	addOrder(t, store, "crashed", time.Hour, order.StatusPending)
+	addOrder(t, store, "working", time.Hour, order.StatusPending)
+	store.Claim(ctx, "crashed")
+	store.Claim(ctx, "working")
+
+	// "crashed" has been processing for 10 min, "working" just started
+	store.SetUpdatedAtForTest("crashed", time.Now().Add(-10*time.Minute))
+
+	var got []string
+	s := &Sweeper{
+		Store:           store,
+		MaxAge:          time.Minute,
+		StuckProcessing: 5 * time.Minute,
+		Submit:          func(id string) error { got = append(got, id); return nil },
+	}
+	if _, err := s.sweepOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 || got[0] != "crashed" {
+		t.Fatalf("expected only the crashed order to be requeued, got %v", got)
+	}
+	if o, _ := store.Get(ctx, "working"); o.Status != order.StatusProcessing {
+		t.Fatalf("order a worker is still on shouldn't be touched, status=%s", o.Status)
+	}
+	// and the requeued one can be claimed again by a worker
+	if ok, _ := store.Claim(ctx, "crashed"); !ok {
+		t.Fatal("reset order should be claimable")
+	}
+}
+
+func TestStuckProcessingOff(t *testing.T) {
+	store := order.NewMemStore()
+	ctx := context.Background()
+	addOrder(t, store, "x", time.Hour, order.StatusPending)
+	store.Claim(ctx, "x")
+	store.SetUpdatedAtForTest("x", time.Now().Add(-time.Hour))
+
+	s := &Sweeper{Store: store, MaxAge: time.Minute, Submit: func(string) error { return nil }}
+	s.sweepOnce(ctx)
+	if o, _ := store.Get(ctx, "x"); o.Status != order.StatusProcessing {
+		t.Fatal("StuckProcessing=0 should leave processing orders alone")
+	}
+}

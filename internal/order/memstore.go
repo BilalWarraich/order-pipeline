@@ -110,3 +110,17 @@ func (m *MemStore) StalePending(_ context.Context, before time.Time, limit int) 
 	}
 	return ids, nil
 }
+
+func (m *MemStore) ResetStuckProcessing(_ context.Context, before time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, o := range m.orders {
+		if o.Status == StatusProcessing && o.UpdatedAt.Before(before) {
+			o.Status = StatusPending
+			o.UpdatedAt = time.Now().UTC()
+			n++
+		}
+	}
+	return n, nil
+}
