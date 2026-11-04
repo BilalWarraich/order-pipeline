@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -20,6 +20,8 @@ import (
 )
 
 type Server struct {
+	// Log defaults to slog.Default(), tests swap it for one writing to a buffer
+	Log     *slog.Logger
 	store   order.Store
 	pool    *worker.Pool
 	reg     *prometheus.Registry
@@ -28,14 +30,14 @@ type Server struct {
 
 func New(store order.Store, pool *worker.Pool) *Server {
 	reg, hist := newRegistry(pool)
-	return &Server{store: store, pool: pool, reg: reg, reqHist: hist}
+	return &Server{Log: slog.Default(), store: store, pool: pool, reg: reg, reqHist: hist}
 }
 
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(requestLogger(s.Log))
 	r.Use(middleware.Recoverer)
 	r.Use(metricsMiddleware(s.reqHist))
 	r.Use(middleware.Timeout(10 * time.Second))
@@ -96,7 +98,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("create order: %v", err)
+		s.Log.ErrorContext(r.Context(), "create order", "err", err, "request_id", middleware.GetReqID(r.Context()))
 		writeErr(w, http.StatusInternalServerError, "could not save order")
 		return
 	}
@@ -104,12 +106,17 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 	// order is saved as pending, so even if the queue is full nothing is lost.
 	// a sweeper could pick up old pending ones later (not done yet)
 	if err := s.pool.Submit(o.ID); err != nil {
-		log.Printf("submit %s: %v", o.ID, err)
+		s.Log.WarnContext(r.Context(), "couldn't queue order, sweeper will pick it up",
+			"order_id", o.ID, "request_id", middleware.GetReqID(r.Context()), "err", err)
 		w.Header().Set("Retry-After", "5")
 		writeErr(w, http.StatusServiceUnavailable, "too busy, try again shortly")
 		return
 	}
 
+	// this line is what ties a request to an order, after this everything about
+	// the order is logged with order_id
+	s.Log.InfoContext(r.Context(), "order created", "order_id", o.ID,
+		"request_id", middleware.GetReqID(r.Context()), "total_cents", o.TotalCts)
 	writeJSON(w, http.StatusAccepted, o)
 }
 
@@ -120,7 +127,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 func (s *Server) replayOrder(w http.ResponseWriter, r *http.Request, key string, req createReq) {
 	existing, err := s.store.GetByIdempotencyKey(r.Context(), key)
 	if err != nil {
-		log.Printf("idempotency lookup: %v", err)
+		s.Log.ErrorContext(r.Context(), "idempotency lookup", "err", err, "request_id", middleware.GetReqID(r.Context()))
 		writeErr(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
@@ -139,7 +146,7 @@ func (s *Server) getOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("get order: %v", err)
+		s.Log.ErrorContext(r.Context(), "get order", "err", err, "request_id", middleware.GetReqID(r.Context()))
 		writeErr(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
@@ -153,7 +160,7 @@ func (s *Server) listOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	orders, err := s.store.List(r.Context(), limit)
 	if err != nil {
-		log.Printf("list orders: %v", err)
+		s.Log.ErrorContext(r.Context(), "list orders", "err", err, "request_id", middleware.GetReqID(r.Context()))
 		writeErr(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
@@ -189,7 +196,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		// headers are already sent at this point, nothing useful to do but log
-		log.Printf("write response: %v", err)
+		slog.Error("write response", "err", err)
 	}
 }
 

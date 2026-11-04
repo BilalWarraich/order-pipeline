@@ -3,7 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 )
@@ -49,10 +49,11 @@ func (p *Pool) run(n int) {
 		// we let them finish (Shutdown has its own deadline)
 		if err := p.handler(context.Background(), id); err != nil {
 			p.failed.Add(1)
-			log.Printf("worker %d: order %s failed: %v", n, id, err)
+			slog.Warn("order failed", "order_id", id, "worker", n, "err", err)
 			continue
 		}
 		p.processed.Add(1)
+		slog.Info("order done", "order_id", id, "worker", n)
 	}
 }
 

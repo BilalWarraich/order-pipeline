@@ -104,6 +104,8 @@ Orders over $5000 get rejected by the "fraud check", so you can see the failed p
 | `QUEUE_SIZE` | 100 | |
 | `FAIL_RATE` | 0 | chance a fake step fails, 0-1 |
 | `STUCK_AFTER_SECS` | 120 | sweeper re-queues pending orders older than this |
+| `LOG_FORMAT` | text | `json` for one json object per line |
+| `LOG_LEVEL` | info | `debug`, `info`, `warn`, `error` |
 | `STUCK_PROCESSING_SECS` | 300 | orders in `processing` longer than this get reset to pending (0 = off) |
 
 ## Deploying
@@ -118,6 +120,26 @@ Tables get created on startup (`migrations/`). If `DATABASE_URL` is empty it jus
 in-memory store, which also works for a quick demo.
 
 Free instances sleep after ~15 min idle, so the first request can take a while.
+
+## Logs
+
+Structured logs with `log/slog`. Locally they're `key=value` text, with `LOG_FORMAT=json` (what I use on
+Render) every line is a json object, so the log viewer can filter on fields.
+
+Every request gets one `request` line with `request_id`, method, route pattern, status and `duration_ms`.
+Creating an order logs `order created` with both `request_id` and `order_id`, and from there everything
+about that order (worker, sweeper) is logged with `order_id`. So to follow one request:
+
+```
+request_id=abc123      -> the request line + "order created" (gives you the order_id)
+order_id=ord_8f3a...   -> queued, done/failed, requeued by the sweeper, ...
+```
+
+```
+{"time":"...","level":"INFO","msg":"request","request_id":"host/abc-000001","method":"POST","route":"/orders","status":202,"duration_ms":0.412}
+{"time":"...","level":"INFO","msg":"order created","order_id":"ord_8f3a...","request_id":"host/abc-000001","total_cents":9998}
+{"time":"...","level":"INFO","msg":"order done","order_id":"ord_8f3a...","worker":2}
+```
 
 ## Tests
 

@@ -6,7 +6,7 @@ package sweeper
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/BilalWarraich/order-pipeline/internal/worker"
@@ -40,9 +40,9 @@ func (s *Sweeper) Run(ctx context.Context) {
 		case <-t.C:
 			n, err := s.sweepOnce(ctx)
 			if err != nil {
-				log.Printf("sweeper: %v", err)
+				slog.Error("sweeper", "err", err)
 			} else if n > 0 {
-				log.Printf("sweeper: requeued %d stuck orders", n)
+				slog.Info("sweeper requeued stuck orders", "count", n)
 			}
 		}
 	}
@@ -60,7 +60,7 @@ func (s *Sweeper) sweepOnce(ctx context.Context) (int, error) {
 		}
 		if reset > 0 {
 			// they're pending again with an old created_at, so the query below picks them up
-			log.Printf("sweeper: %d orders were stuck in processing, reset to pending", reset)
+			slog.Warn("orders were stuck in processing, reset to pending", "count", reset)
 		}
 	}
 
@@ -71,6 +71,7 @@ func (s *Sweeper) sweepOnce(ctx context.Context) (int, error) {
 
 	n := 0
 	for _, id := range ids {
+		slog.Debug("sweeper requeueing", "order_id", id)
 		err := s.Submit(id)
 		if errors.Is(err, worker.ErrQueueFull) || errors.Is(err, worker.ErrClosed) {
 			// try again next tick, no point hammering a full queue

@@ -12,3 +12,5 @@ services:
         value: "4"
       - key: FAIL_RATE
         value: "0.05"
+      - key: LOG_FORMAT
+        value: json

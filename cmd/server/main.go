@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BilalWarraich/order-pipeline/internal/api"
+	"github.com/BilalWarraich/order-pipeline/internal/logging"
 	"github.com/BilalWarraich/order-pipeline/internal/order"
 	"github.com/BilalWarraich/order-pipeline/internal/sweeper"
 	"github.com/BilalWarraich/order-pipeline/internal/worker"
@@ -20,6 +21,8 @@ import (
 )
 
 func main() {
+	slog.SetDefault(logging.New(os.Stdout, os.Getenv("LOG_FORMAT"), os.Getenv("LOG_LEVEL")))
+
 	addr := env("ADDR", ":8080")
 	// most hosting platforms (render, koyeb, cloud run...) pass the port this way
 	if port := os.Getenv("PORT"); port != "" {
@@ -35,20 +38,20 @@ func main() {
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, err := pgxpool.New(ctx, dsn)
 		if err != nil {
-			log.Fatalf("db: %v", err)
+			fatal("db", err)
 		}
 		defer db.Close()
 		if err := db.Ping(ctx); err != nil {
-			log.Fatalf("db ping: %v", err)
+			fatal("db ping", err)
 		}
 		if err := migrations.Run(ctx, db); err != nil {
-			log.Fatalf("migrations: %v", err)
+			fatal("migrations", err)
 		}
 		store = order.NewPGStore(db)
-		log.Println("using postgres")
+		slog.Info("using postgres")
 	} else {
 		store = order.NewMemStore()
-		log.Println("DATABASE_URL not set, using in-memory store")
+		slog.Warn("DATABASE_URL not set, using in-memory store")
 	}
 
 	failRate, _ := strconv.ParseFloat(os.Getenv("FAIL_RATE"), 64)
@@ -58,7 +61,8 @@ func main() {
 	stuckProcessing := time.Duration(envInt("STUCK_PROCESSING_SECS", 300)) * time.Second
 	if stuckProcessing > 0 && stuckProcessing < 2*proc.Timeout {
 		// a live worker could still be on an order this young
-		log.Printf("warning: STUCK_PROCESSING_SECS is less than 2x the processor timeout (%v), orders might get processed twice", proc.Timeout)
+		slog.Warn("STUCK_PROCESSING_SECS is less than 2x the processor timeout, orders might get processed twice",
+			"stuck_processing", stuckProcessing, "processor_timeout", proc.Timeout)
 	}
 	sw := &sweeper.Sweeper{
 		Store:           store,
@@ -80,29 +84,34 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on %s (%d workers, queue %d)", addr, workers, queueSize)
+		slog.Info("listening", "addr", addr, "workers", workers, "queue_size", queueSize)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			fatal("http server", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// stop taking new http requests first, then let the workers finish what's queued
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown: %v", err)
+		slog.Error("http shutdown", "err", err)
 	}
 	// ctx is already cancelled so the sweeper is on its way out, wait for it
 	// so it doesn't submit into a closed pool
 	<-sweeperDone
 	if err := pool.Shutdown(shutdownCtx); err != nil {
-		log.Printf("worker shutdown: %v (some orders may still be pending)", err)
+		slog.Error("worker shutdown, some orders may still be pending", "err", err)
 	}
-	log.Println("bye")
+	slog.Info("bye")
+}
+
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err)
+	os.Exit(1)
 }
 
 func env(k, def string) string {
