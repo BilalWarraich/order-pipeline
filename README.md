@@ -141,6 +141,17 @@ order_id=ord_8f3a...   -> queued, done/failed, requeued by the sweeper, ...
 {"time":"...","level":"INFO","msg":"order done","order_id":"ord_8f3a...","worker":2}
 ```
 
+## Docker image
+
+Every push to main builds the image and pushes it to GitHub's registry
+(`.github/workflows/docker.yml`), tagged `latest` and with the commit sha:
+
+```
+docker run -p 8080:8080 ghcr.io/bilalwarraich/order-pipeline:latest
+```
+
+PRs build it too but don't push, so a broken Dockerfile shows up before merging.
+
 ## Tests
 
 ```
