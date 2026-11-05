@@ -99,14 +99,15 @@ Orders over $5000 get rejected by the "fraud check", so you can see the failed p
 | env | default | |
 |---|---|---|
 | `ADDR` | `:8080` | |
+| `PORT` | - | if set, overrides `ADDR` (render, cloud run etc. set this) |
 | `DATABASE_URL` | - | in-memory store if empty |
 | `WORKERS` | 4 | |
 | `QUEUE_SIZE` | 100 | |
 | `FAIL_RATE` | 0 | chance a fake step fails, 0-1 |
 | `STUCK_AFTER_SECS` | 120 | sweeper re-queues pending orders older than this |
+| `STUCK_PROCESSING_SECS` | 300 | orders in `processing` longer than this get reset to pending (0 = off) |
 | `LOG_FORMAT` | text | `json` for one json object per line |
 | `LOG_LEVEL` | info | `debug`, `info`, `warn`, `error` |
-| `STUCK_PROCESSING_SECS` | 300 | orders in `processing` longer than this get reset to pending (0 = off) |
 
 ## Deploying
 
@@ -164,4 +165,5 @@ make test
 - [x] same thing for orders stuck in `processing` after a crash
 - [x] prometheus metrics (`/metrics`: request latency per route, queue depth, processed/failed)
 - [ ] replace the in-process queue with NATS or something so it can scale out
+- [ ] real http clients for inventory/fraud/payment instead of the fakes, with their own idempotency keys
 - [x] idempotency keys on POST
