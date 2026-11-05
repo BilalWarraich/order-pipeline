@@ -103,8 +103,8 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// order is saved as pending, so even if the queue is full nothing is lost.
-	// a sweeper could pick up old pending ones later (not done yet)
+	// order is saved as pending, so even if the queue is full nothing is lost,
+	// the sweeper re-queues old pending orders
 	if err := s.pool.Submit(o.ID); err != nil {
 		s.Log.WarnContext(r.Context(), "couldn't queue order, sweeper will pick it up",
 			"order_id", o.ID, "request_id", middleware.GetReqID(r.Context()), "err", err)

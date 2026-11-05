@@ -24,7 +24,7 @@ func main() {
 	slog.SetDefault(logging.New(os.Stdout, os.Getenv("LOG_FORMAT"), os.Getenv("LOG_LEVEL")))
 
 	addr := env("ADDR", ":8080")
-	// most hosting platforms (render, koyeb, cloud run...) pass the port this way
+	// most hosting platforms (render, cloud run...) pass the port this way
 	if port := os.Getenv("PORT"); port != "" {
 		addr = ":" + port
 	}
